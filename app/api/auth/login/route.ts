@@ -1,34 +1,72 @@
-import { prisma } from "@/lib/prisma";
-import bcrypt from "bcryptjs";
-import { signToken } from "@/lib/jwt";
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { comparePassword } from "@/lib/auth/password";
+import { signAccessToken, signRefreshToken } from "@/lib/auth/jwt";
+import { setAuthCookies } from "@/lib/auth/cookies";
+import { throwAuth, AuthError } from "@/lib/auth/errors";
 
 export async function POST(req: Request) {
-  const { email, password } = await req.json();
+  try {
+    const { email, password } = await req.json();
 
-  const user = await prisma.user.findUnique({ where: { email } });
+    if (!email || !password) {
+      throwAuth("Email and password are required", 400);
+    }
 
-  if (!user)
-    return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
+    // Find staff user
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
 
-  const valid = await bcrypt.compare(password, user.password);
-  if (!valid)
-    return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
+    if (!user) {
+      throwAuth("Invalid email or password", 401);
+    }
 
-  const token = signToken({
-    id: user.id,
-    role: user.role,
-    email: user.email,
-  });
+    // Compare password
+    const isMatch = await comparePassword(password, user.password);
+    if (!isMatch) {
+      throwAuth("Invalid email or password", 401);
+    }
 
-  const res = NextResponse.json({ success: true });
+    // Create tokens (payload only needs ID & role)
+    const payload = {
+      id: user.id,
+      role: user.role,
+      email: user.email,
+    };
 
-  res.cookies.set("token", token, {
-    httpOnly: true,
-    secure: true,
-    path: "/",
-    maxAge: 60 * 60 * 24 * 7,
-  });
+    const accessToken = signAccessToken(payload);
+    const refreshToken = signRefreshToken(payload);
 
-  return res;
+    // Set HttpOnly cookies
+    setAuthCookies(accessToken, refreshToken);
+
+    // Log login action
+    await prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        action: "LOGIN",
+        entity: "User",
+        entityId: user.id,
+      },
+    });
+
+    return NextResponse.json({
+      message: "Login successful",
+      user: {
+        id: user.id,
+        name: user.name,
+        role: user.role,
+      },
+    });
+  } catch (err: any) {
+    console.error("LOGIN ERROR:", err);
+
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
+
+    return NextResponse.json({ error: "Server error" }, { status: 500 });
+  }
 }

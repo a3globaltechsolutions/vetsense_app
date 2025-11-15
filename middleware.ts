@@ -1,31 +1,58 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { verifyToken } from "./lib/jwt";
+import type { NextRequest } from "next/server";
+import jwt from "jsonwebtoken";
 
-const protectedRoutes = ["/dashboard", "/horses", "/admin"];
+export async function middleware(req: NextRequest) {
+  const url = req.nextUrl.clone();
+  const pathname = req.nextUrl.pathname;
 
-export function middleware(req: any) {
-  const path = req.nextUrl.pathname;
+  // Protect dashboard routes
+  if (pathname.startsWith("/dashboard")) {
+    const token = req.cookies.get("vetsense_token")?.value;
 
-  // PUBLIC ROUTES
-  if (!protectedRoutes.some((route) => path.startsWith(route))) {
-    return NextResponse.next();
+    if (!token) {
+      url.pathname = "/login";
+      return NextResponse.redirect(url);
+    }
+
+    try {
+      // Verify JWT
+      const decoded: any = jwt.verify(token, process.env.JWT_SECRET as string);
+
+      // Block clients
+      if (decoded.role === "CLIENT") {
+        url.pathname = "/login";
+        return NextResponse.redirect(url);
+      }
+
+      // Allowed staff roles
+      const allowedRoles = ["ADMIN", "VET_OFFICER", "ASSISTANT"];
+
+      if (!allowedRoles.includes(decoded.role)) {
+        url.pathname = "/login";
+        return NextResponse.redirect(url);
+      }
+
+      // Add user to request headers (optional)
+      const res = NextResponse.next();
+      res.headers.set("x-user-id", decoded.id);
+      res.headers.set("x-user-role", decoded.role);
+
+      return res;
+    } catch (err) {
+      console.error("JWT ERROR:", err);
+
+      url.pathname = "/login";
+      return NextResponse.redirect(url);
+    }
   }
 
-  const token = req.cookies.get("token")?.value;
-  if (!token) return NextResponse.redirect(new URL("/login", req.url));
-
-  const decoded = verifyToken(token);
-  if (!decoded) return NextResponse.redirect(new URL("/login", req.url));
-
-  // Admin-only routes
-  if (path.startsWith("/admin") && decoded.role !== "ADMIN") {
-    return NextResponse.redirect(new URL("/not-authorized", req.url));
-  }
-
+  // Allow all other routes
   return NextResponse.next();
 }
 
+// Match only dashboard routes
 export const config = {
-  matcher: ["/dashboard/:path*", "/horses/:path*", "/admin/:path*"],
+  matcher: ["/dashboard/:path*"],
 };
