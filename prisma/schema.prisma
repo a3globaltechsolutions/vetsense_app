@@ -1,9 +1,253 @@
+// ------------------------------------------------------
+//  VETSENSE DIGITAL PASSPORT SYSTEM — PRISMA SCHEMA
+// ------------------------------------------------------
+
 generator client {
-  provider = "prisma-client"
-  output   = "../lib/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+// ------------------------------------------------------
+//  USER & AUTH MODELS
+// ------------------------------------------------------
+
+model User {
+  id          String    @id @default(cuid())
+  name        String
+  email       String    @unique
+  password    String
+  role        Role      @default(ASSISTANT)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Password Reset
+  passwordResetToken    String?
+  passwordResetExpires  DateTime?
+
+  // Relations
+  passports   Passport[]
+  seals       DigitalSeal[]
+  uploads     Upload[]
+  auditLogs   AuditLog[]
+}
+
+enum Role {
+  ADMIN
+  VET_OFFICER
+  ASSISTANT
+  CLIENT
+}
+
+// ------------------------------------------------------
+//  OWNER (CLIENT) MODEL
+// ------------------------------------------------------
+
+model Owner {
+  id          String   @id @default(cuid())
+  name        String
+  phone       String?
+  email       String?
+  address     String?
+  createdAt   DateTime @default(now())
+
+  horses      Horse[]
+}
+
+// ------------------------------------------------------
+//  HORSE MODEL
+// ------------------------------------------------------
+
+model Horse {
+  id          String   @id @default(cuid())
+  name        String
+  breed       String?
+  sex         String?
+  color       String?
+  markings    String?
+  dateOfBirth DateTime?
+  microchip   String?  @unique
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ownerId     String?
+  owner       Owner?   @relation(fields: [ownerId], references: [id])
+
+  photos      Upload[]
+  passports   Passport[]
+  medicalRecords MedicalRecord[]
+  vaccinations   VaccinationRecord[]
+  labTests       LabTest[]
+}
+
+// ------------------------------------------------------
+//  PASSPORT & PASSPORT SECTIONS (10 PARTS)
+// ------------------------------------------------------
+
+model Passport {
+  id            String   @id @default(cuid())
+  passportNumber Int      @unique
+  issueDate     DateTime @default(now())
+  status        PassportStatus @default(DRAFT)
+
+  horseId       String
+  horse         Horse     @relation(fields: [horseId], references: [id])
+
+  vetId         String
+  vet           User      @relation(fields: [vetId], references: [id])
+
+  // Links to PDF files
+  brandPdfUrl   String?
+  printPdfUrl   String?
+  zipFileUrl    String?
+
+  sections      PassportSection[]
+  sealsApplied  AppliedSeal[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+enum PassportStatus {
+  DRAFT
+  FINAL
+}
+
+model PassportSection {
+  id          String    @id @default(cuid())
+  sectionName String
+  content     Json?
+
+  passportId  String
+  passport    Passport  @relation(fields: [passportId], references: [id])
+}
+
+// ------------------------------------------------------
+//  PASSPORT COUNTER (AUTOMATIC NUMBERING)
+// ------------------------------------------------------
+
+model PassportCounter {
+  id      Int     @id @default(1)
+  nextNum Int     @default(1000)
+}
+
+// ------------------------------------------------------
+//  MEDICAL RECORDS
+// ------------------------------------------------------
+
+model MedicalRecord {
+  id          String   @id @default(cuid())
+  horseId     String
+  diagnosis   String?
+  treatment   String?
+  notes       String?
+  date        DateTime @default(now())
+
+  horse       Horse    @relation(fields: [horseId], references: [id])
+}
+
+// ------------------------------------------------------
+//  LAB TEST MODEL
+// ------------------------------------------------------
+
+model LabTest {
+  id          String   @id @default(cuid())
+  horseId     String
+  testName    String
+  result      String?
+  date        DateTime @default(now())
+
+  horse       Horse    @relation(fields: [horseId], references: [id])
+}
+
+// ------------------------------------------------------
+//  VACCINATION RECORDS
+// ------------------------------------------------------
+
+model VaccinationRecord {
+  id           String   @id @default(cuid())
+  horseId      String
+  vaccineName  String
+  dateGiven    DateTime
+  nextDueDate  DateTime?
+
+  horse        Horse    @relation(fields: [horseId], references: [id])
+}
+
+// ------------------------------------------------------
+//  DIGITAL SEALS & SIGNATURES
+// ------------------------------------------------------
+
+model DigitalSeal {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  type        SealType
+  imageUrl    String
+  hash        String   // SHA-256 integrity
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id])
+  applied     AppliedSeal[]
+}
+
+enum SealType {
+  CIRCULAR
+  EMBLEM
+  WAX
+  SIGNATURE
+}
+
+model AppliedSeal {
+  id          String   @id @default(cuid())
+  passportId  String
+  sealId      String
+  appliedAt   DateTime @default(now())
+
+  passport    Passport @relation(fields: [passportId], references: [id])
+  seal        DigitalSeal @relation(fields: [sealId], references: [id])
+}
+
+// ------------------------------------------------------
+//  UPLOADS / DOCUMENT STORAGE
+// ------------------------------------------------------
+
+model Upload {
+  id        String   @id @default(cuid())
+  url       String
+  type      UploadType
+  publicId  String?
+  createdAt DateTime @default(now())
+
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+
+  horseId   String?
+  horse     Horse?   @relation(fields: [horseId], references: [id])
+}
+
+enum UploadType {
+  HORSE_PHOTO
+  LAB_REPORT
+  VET_SIGNATURE
+  PDF_PASSPORT
+}
+
+// ------------------------------------------------------
+//  AUDIT LOGS
+// ------------------------------------------------------
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String
+  action      String
+  entity      String?
+  entityId    String?
+  timestamp   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id])
 }
